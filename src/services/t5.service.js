@@ -1,127 +1,3 @@
-// const axios = require("axios");
-
-// // =========================
-// // 🧠 PROMPT BUILDER
-// // =========================
-// const buildPrompt = (text, category) => {
-
-//     return `
-// You are an AI that extracts structured data from emails.
-
-// Rules:
-// - STRICT format: Key: Value
-// - NO extra text
-// - NO explanations
-// - If missing → write N/A
-
-// Category: ${category}
-
-// Extract:
-
-// Company:
-// Role:
-// Title:
-// Course:
-// Provider:
-// Project Title:
-// Deadline:
-// Date:
-// Time:
-// Apply Link:
-// Registration Link:
-
-// Email:
-// ${text}
-// `;
-// };
-
-// // =========================
-// // 🤖 MAIN FUNCTION
-// // =========================
-// exports.extractDetails = async (text, category) => {
-//     try {
-//         const prompt = buildPrompt(text, category);
-
-//         const response = await axios.post(
-//             process.env.T5_API_URL,
-//             { inputs: prompt },
-//             { timeout: 15000 }
-//         );
-
-//         const output = response.data?.[0]?.generated_text || "";
-
-//         let parsed = parseOutput(output);
-
-//         // 🔥 FALLBACK: extract links manually
-//         const links = extractLinks(text);
-
-//         if (!parsed.apply_link && links.length > 0) {
-//             parsed.apply_link = links[0];
-//         }
-
-//         if (!parsed.registration_link && links.length > 1) {
-//             parsed.registration_link = links[1];
-//         }
-
-//         // 🔥 CLEAN EMPTY VALUES
-//         Object.keys(parsed).forEach(key => {
-//             if (!parsed[key] || parsed[key] === "N/A") {
-//                 delete parsed[key];
-//             }
-//         });
-
-//         return parsed;
-
-//     } catch (err) {
-//         console.error("❌ T5 ERROR:", err.message);
-
-//         // 🔥 FALLBACK ONLY LINKS
-//         return {
-//             apply_link: extractLinks(text)[0] || null
-//         };
-//     }
-// };
-
-// // =========================
-// // 🔍 ROBUST PARSER
-// // =========================
-// const parseOutput = (text) => {
-//     const data = {};
-
-//     const lines = text
-//         .replace(/\r/g, "")
-//         .split("\n")
-//         .map(l => l.trim())
-//         .filter(Boolean);
-
-//     lines.forEach(line => {
-//         const idx = line.indexOf(":");
-//         if (idx === -1) return;
-
-//         const key = line
-//             .slice(0, idx)
-//             .trim()
-//             .toLowerCase()
-//             .replace(/ /g, "_");
-
-//         const value = line.slice(idx + 1).trim();
-
-//         if (key && value) {
-//             data[key] = value;
-//         }
-//     });
-
-//     return data;
-// };
-
-// // =========================
-// // 🔗 LINK EXTRACTOR
-// // =========================
-// const extractLinks = (text) => {
-//     const regex = /(https?:\/\/[^\s]+)/g;
-//     return text.match(regex) || [];
-// };
-
 const axios = require("axios");
 
 // =========================
@@ -154,9 +30,16 @@ ${text}
             return `
 Extract assignment details.
 
+Rules:
+- STRICT format Key: Value
+- NO extra text
+- If missing → N/A
+
 Title:
 Course:
 Deadline:
+Instructions:
+Submission Link:
 
 Text:
 ${text}
@@ -166,9 +49,15 @@ ${text}
             return `
 Extract exam details.
 
+Rules:
+- STRICT format Key: Value
+- NO extra text
+- If missing → N/A
+
 Subject:
 Date:
 Time:
+Syllabus:
 
 Text:
 ${text}
@@ -178,9 +67,16 @@ ${text}
             return `
 Extract course details.
 
+Rules:
+- STRICT format Key: Value
+- NO extra text
+- If missing → N/A
+
 Course Name:
 Provider:
 Start Date:
+Duration:
+Link:
 
 Text:
 ${text}
@@ -191,9 +87,15 @@ ${text}
             return `
 Extract event details.
 
+Rules:
+- STRICT format Key: Value
+- NO extra text
+- If missing → N/A
+
 Title:
 Date:
 Time:
+Location:
 Registration Link:
 
 Text:
@@ -204,8 +106,14 @@ ${text}
             return `
 Extract project details.
 
+Rules:
+- STRICT format Key: Value
+- NO extra text
+- If missing → N/A
+
 Project Title:
 Deadline:
+Requirements:
 
 Text:
 ${text}
@@ -215,8 +123,14 @@ ${text}
             return `
 Extract important info.
 
+Rules:
+- STRICT format Key: Value
+- NO extra text
+- If missing → N/A
+
 Title:
 Deadline:
+Link:
 
 Text:
 ${text}
@@ -234,10 +148,27 @@ exports.extractDetails = async (text, category) => {
         const response = await axios.post(
             process.env.T5_API_URL,
             { inputs: prompt },
-            { timeout: 15000 }
+            {
+                timeout: 20000,
+                headers: {
+                    Authorization: `Bearer ${process.env.T5_API_KEY}`,
+                    "Content-Type": "application/json"
+                }
+            }
         );
 
-        const output = response.data?.[0]?.generated_text || "";
+        // =========================
+        // 🔥 HUGGINGFACE RESPONSE SAFE HANDLING
+        // =========================
+        let output = "";
+
+        if (Array.isArray(response.data)) {
+            output = response.data?.[0]?.generated_text || "";
+        } else if (response.data?.generated_text) {
+            output = response.data.generated_text;
+        } else {
+            output = "";
+        }
 
         let parsed = parseOutput(output);
 
@@ -254,8 +185,12 @@ exports.extractDetails = async (text, category) => {
             parsed.registration_link = links[1];
         }
 
+        if (!parsed.link && links[0]) {
+            parsed.link = links[0];
+        }
+
         // =========================
-        // 🔥 NORMALIZE KEYS (UI SAFE)
+        // 🔥 NORMALIZE FIELDS
         // =========================
         parsed = normalizeFields(parsed);
 
@@ -263,7 +198,11 @@ exports.extractDetails = async (text, category) => {
         // 🔥 REMOVE EMPTY
         // =========================
         Object.keys(parsed).forEach(key => {
-            if (!parsed[key] || parsed[key] === "N/A") {
+            if (
+                !parsed[key] ||
+                parsed[key] === "N/A" ||
+                parsed[key] === "n/a"
+            ) {
                 delete parsed[key];
             }
         });
@@ -271,8 +210,15 @@ exports.extractDetails = async (text, category) => {
         return parsed;
 
     } catch (err) {
-        console.error("❌ T5 ERROR:", err.message);
 
+        console.error(
+            "❌ T5 ERROR:",
+            err.response?.data || err.message
+        );
+
+        // =========================
+        // 🔥 SAFE FALLBACK
+        // =========================
         return {
             title: text.slice(0, 80),
             apply_link: extractLinks(text)[0] || null
@@ -294,6 +240,7 @@ const parseOutput = (text) => {
 
     lines.forEach(line => {
         const idx = line.indexOf(":");
+
         if (idx === -1) return;
 
         const key = line
@@ -302,7 +249,9 @@ const parseOutput = (text) => {
             .toLowerCase()
             .replace(/ /g, "_");
 
-        const value = line.slice(idx + 1).trim();
+        const value = line
+            .slice(idx + 1)
+            .trim();
 
         if (key && value) {
             data[key] = value;
@@ -313,14 +262,18 @@ const parseOutput = (text) => {
 };
 
 // =========================
-// 🔥 NORMALIZE FIELDS (IMPORTANT FOR UI)
+// 🔥 NORMALIZE FIELDS
 // =========================
 const normalizeFields = (data) => {
+
     const map = {
         course_name: "course",
         project_title: "title",
         subject: "subject_name",
         company_name: "company",
+        exam_date: "date",
+        applylink: "apply_link",
+        registrationlink: "registration_link"
     };
 
     Object.keys(map).forEach(key => {
